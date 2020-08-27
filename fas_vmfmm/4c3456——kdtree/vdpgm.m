@@ -92,7 +92,7 @@ if strcmp(opts.algorithm,'vdp')
     while isfinite(besseli(size(data.given_data',2)/2,opts.max_kk+10))
         opts.max_kk = opts.max_kk+10;
     end
-    extra_V.kk = [30,30];
+    extra_V.kk = [70,70];
     extra_V.ln_kk = psi(hp_prior.a)-log(hp_prior.b);
     extra_V.kk_approx=extra_V.kk-(hp_prior.a>1)*(1./hp_prior.b);
 
@@ -112,7 +112,7 @@ if opts.do_greedy
 else
   [free_energy, hp_posterior, data] = split_merge(data, hp_posterior, hp_prior, opts);
 end
-kk=hp_posterior.a./hp_posterior.b
+kk=hp_posterior.a./hp_posterior.b;
 results.algorithm = opts.algorithm;
 results.elapsed_time = etime(clock, start_time);
 results.free_energy = free_energy;
@@ -127,9 +127,9 @@ cluster=1:size(hp_posterior.mu,2);
 t1=mk_map_log_p_of_x_given_c(given_data, cluster, hp_posterior, opts,new_extra_V);
 [~,Y_pred] = max(t1',[],2);
 
-[FMeasure,Accuracy] = Fmeasure(Y', Y_pred')
- Nmi=nmi(Y', Y_pred')
-
+ [FMeasure,Accuracy] = Fmeasure(Y', Y_pred')
+%  Nmi=nmi(Y', Y_pred')
+ results.K-1;
 if opts.get_r
   results.r = mk_r(data, hp_posterior, hp_prior, opts);
   if opts.use_kd_tree
@@ -226,6 +226,7 @@ for c = candidates(1:min(c_max, length(candidates)))
   else
     sub_data.given_data = new_data(c).given_data(:,relating_n);
   end
+
   [sub_hp_posteior,sub_extra_V] = mk_hp_posterior(sub_data, sub_r, hp_prior, opts,sub_extra_V);
   [sub_f, sub_hp_posteior, dummy, sub_r,sub_extra_V] = update_posterior2(sub_data, ...
                                                     sub_hp_posteior,sub_extra_V, ...
@@ -310,7 +311,7 @@ end
 if opts.use_kd_tree
     arg1_data = [new_data.kdtree(:).mean];
 else
-    arg1_data = new_data.given_data;
+     arg1_data = new_data.given_data;
 end
 dir = divide_by_principal_component(arg1_data, ...
                                 hp_posterior.B{c}, ...
@@ -471,7 +472,7 @@ while 1
   end
   % check if the last component is small enough
   
-  if isequal(opts.algorithm, 'vdp') & sum(r(:,end)) >1
+  if isequal(opts.algorithm, 'vdp') & sum(r(:,end)) >1.0e-5
     r(:,end+1) = 0;
     extra_V.kk_approx(:,end+1) = 1;
     extra_V.kk(:,end+1)=1;
@@ -482,7 +483,7 @@ while 1
     [r,~,extra_V] = sort_r(data, r, opts,extra_V);
   end
  
-  if isequal(opts.algorithm, 'vdp') & sum(r(:,end-1)) <1
+  if isequal(opts.algorithm, 'vdp') & sum(r(:,end-1)) <1.0e-2
       r(:,end-1) = [];
     extra_V.kk_approx(:,end-1) = [];
     extra_V.kk(:,end-1) = [];
@@ -490,10 +491,7 @@ while 1
   end
 
   [hp_posterior,extra_V] = mk_hp_posterior(data, r, hp_prior, opts,extra_V);
-%   t1=sum(hp_posterior.a)
-%   t2=sum(hp_posterior.b)
-%   t3=hp_posterior.a./hp_posterior.b
-% t4=sum(hp_posterior.a./hp_posterior.b)
+
 end
 % disp_status(free_energy, hp_posterior, opts);
 disp(['### updating posterior ... done.'])
@@ -509,7 +507,6 @@ else
 end
 [dummy,I] = sort(Nc(1:end-1), 2, 'descend');
 I(end+1) = length(Nc);
-
 
 r = r(:,I);
 extra_V.kk = extra_V.kk(I);
@@ -718,24 +715,28 @@ if isequal(opts.algorithm, 'vdp')
 end
 hp_posterior.r = r; 
 
-
 % vmf的方差
 if opts.use_kd_tree
     t1 = reshape([data.kdtree(:).sum_xx],D,D,N);
     sum_x = repmat(reshape([data.kdtree(:).sum_x],D,1,N),[1,D,1]);
     Na_1 = repmat(reshape([data.kdtree(:).N],1,1,N),[D,D,1]);
+    for c=1:K
+        t2 = sum_x.*repmat(hp_posterior.mu(:,c)',[D,1,N]);
+        S1 = (t1 - 2*t2 )./Na_1+repmat(hp_posterior.mu(:,c)*hp_posterior.mu(:,c)',[1,1,N]);
+        S=S1/(Nc(:,c));
+         hp_posterior.B{c} = sum(S,3);
+    end
 else
-    t1=data
+    % vmf的方差3
+    D = size(hp_posterior.mu, 1); 
+    nu=D/2-1;
+    for c=1:K
+        h(c)=bes_kk(c);
+        hp_posterior.B{c}=h(c)/extra_V.kk(c)+((1-2*((nu+1)/extra_V.kk(c))*h(c)-h(c)*h(c)))*hp_posterior.mu(:,c)*hp_posterior.mu(:,c)';
+    end
+    hp_posterior.h=h;
+    
 end
-
-for c=1:K
-    t2 = sum_x.*repmat(hp_posterior.mu(:,c)',[D,1,N]);
-    S1 = (t1 - 2*t2 )./Na_1+repmat(hp_posterior.mu(:,c)*hp_posterior.mu(:,c)',[1,1,N]);
-% S1= [data.kdtree(:).sum_x]-hp_posterior.mu(:,c);
-   S=S1/(Nc(:,c));
-     hp_posterior.B{c} = sum(S,3);
-end
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function fc = mk_E_log_q_p_eta(data, hp_posterior, hp_prior, opts,extra_V);
@@ -788,7 +789,6 @@ E_log_p_of_V = ...
      .*(psi(hp_posterior.gamma(2,:))-psi(sum(hp_posterior.gamma,1))));
 
 extra_term = sum(E_log_p_of_V);
-
 if opts.use_kd_tree
   free_energy = extra_term + sum(fc) - [data.kdtree(:).N]*log_sum_exp(S_tk, 2);
 else
@@ -823,7 +823,7 @@ for k=1:K
     if opts.use_kd_tree
      x=[data.kdtree(:).mean];
     else
-     x=data.given.data;
+     x=data.given_data;
     end
     E_log_p_of_x(:,k) = approximatebound(x,hp_posterior.mu(:,k),extra_V.kk(k),extra_V.ln_kk(k),extra_V.kk_approx(k),hp_posterior.Nc(k));
 
@@ -847,7 +847,6 @@ for k=1:K
     
 end
 S_tk(:,end) = S_tk(:,end) - log(1- exp(psi(hp_prior.alpha) - psi(1+hp_prior.alpha)));
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function [r, data, S_tk] = mk_r(data, hp_posterior, hp_prior, opts, extra_V,S_tk);
